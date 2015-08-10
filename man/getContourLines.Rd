@@ -4,7 +4,7 @@
 \alias{getContourLines}
 \title{Get Contour Lines (data.frame)}
 \usage{
-getContourLines(x, y, z, nlevels = 10, binwidth, levels)
+getContourLines(x, y, z, nlevels = 10, binwidth, levels, criticalRatio = 5)
 }
 \arguments{
 \item{x,y}{Numeric data for x and y coordinate, a single matrix or data-frame object can be provided for
@@ -21,6 +21,11 @@ have not been specified.}
 \item{levels}{A numeric vector of the explicitly specified levels (z values) to contour, by specifying this argument,
 it will override \code{nlevels} and/or \code{binwidth}. If this argument is provided, the stacking order of the
 contours will be preserved in the order of first occurence within the supplied vector.}
+
+\item{criticalRatio}{When producing the Delaunay Mesh, the quality of the mesh can be poor in the proximity
+to the convex hull, Del's that have an aspect ratio greater than this value are not considered when producing the
+contours. In this context, the aspect ratio is defined as the circumradius to twice its inradius,
+equilateral triangles have an aspect ratio of 1, everything else is larger}
 }
 \value{
 For the function \code{getContourLines(...)}, the return object is a \code{data.frame} obect

@@ -6,6 +6,7 @@
 #include <deque>
 
 #include "constants.h"
+#include "templates.h"
 
 //Namespaces
 using namespace Rcpp;
@@ -46,6 +47,16 @@ struct Vec2 {
   }
 };
 
+//2D Vector with ID Field
+struct Node2: Vec2{
+  Node2() : Vec2(), id(0){}
+  Node2(int id, double x, double y) : Vec2(x,y),id(id){}
+  Node2(int id, Vec2 vec) : Vec2(vec), id(id) {}
+  int id;
+  bool operator ==(const Node2& n) const { return Vec2::operator==(n) && id == n.id; }
+  bool operator !=(const Node2& n) const { return !(*this == n); }
+};
+
 //3D vector, inherits fro 2D vector
 struct Vec3 : Vec2 {
   Vec3(): Vec2(), z(0) {}
@@ -76,6 +87,18 @@ struct Vec3 : Vec2 {
   }
 };
 
+//Data structure to store Node information
+struct Node3 : Vec3{
+  Node3(){};
+  Node3(int id,Vec3 vec) : Vec3(vec),id(id){}
+  Node3(int id, double x, double y, double z) : Vec3(x,y,z),id(id){}
+  int id;
+  bool operator ==(const Node3& rhs) const { return id == rhs.id; }
+  bool operator !=(const Node3& rhs) const { return id != rhs.id; }
+  bool operator < (const Node3& rhs) const { return id <  rhs.id; }
+  bool operator > (const Node3& rhs) const { return id >  rhs.id; }
+};
+
 //Data Structure to enable sorting of deleaunay triangles.
 struct Centroid{
   //Centroid(); //Intentionally declared but not defined
@@ -92,35 +115,23 @@ struct Centroid{
   Centroid& operator +=(const Vec2& b) {  x += b.x; y += b.y; return *this; }
 };
 
-//Data structure to store Node information
-struct Node{
-  Node(){};
-  Node(int id, Vec3 position) : id(id), position(position){}
-  int id;
-  Vec3 position;
-  bool operator ==(const Node& rhs) const { return id == rhs.id; }
-  bool operator !=(const Node& rhs) const { return id != rhs.id; }
-  bool operator < (const Node& rhs) const { return id <  rhs.id; }
-  bool operator > (const Node& rhs) const { return id >  rhs.id; }
-};
-
 //Data structure to store Edge information:
 struct Edge{
   Edge(){}; //Intentionally declared but not defined
-  Edge(Node A, Node B){
+  Edge(Node3 A, Node3 B){
     if(A == B)
       throw std::invalid_argument("A and B must have unique indexes");
     if(A < B){a = A; b = B;}else{a = B; b = A;}
   }
-  Node a, b;
-  bool isBound(const double& z) const { return (z >= (&a.position)->z && z <= (&b.position)->z) || 
-                                               (z <= (&a.position)->z && z >= (&b.position)->z) ; } 
-  
+  Node3 a, b;
+  bool isBound(const double& z) const { return (z > a.z && z < b.z) || (z < a.z && z > b.z) ; } 
+  bool isAbove(const double& z) const { return a.z > z && b.z > z; }
+  bool isBelow(const double& z) const { return a.z < z && b.z < z; }
+  Node3 highest(){ return a.z > b.z ? a : b; }
+  Node3 lowest(){  return a.z < b.z ? a : b; }
   //Determines is an edge, e, is contained within this object in terms of its z level
-  bool isBound(const Edge& e){
-    return isBound(e.a.position.z) && isBound(e.b.position.z);
-  }
-  
+  bool isBound(const Edge& e){ return isBound(e.a.z) && isBound(e.b.z); }
+  double length(){return (a-b).length(); }
   bool operator ==(const Edge& rhs) const {
     //In the following equality check, the second operation *should* not be required, 
     // since a and b are put in order when Edge is constructed
@@ -143,115 +154,149 @@ struct ContourData{
       double x, y, z;
 };
 
-
 //Forward Declaration.
-Vec3 interpolateZVal(Vec3& a, Vec3& b, double& z);
-bool isIn(vector<double>& x, double& v);
+Vec3 interpolateZVal(Vec3 a, Vec3 b, double z);
 
 //Data structure for storing a deleaunay triangle, constructed by three (3) unique Nodes,
 //internally it will store three (3) Edges...
 struct Del{
   Del(); //Intentionally declared but not defined
   //Constructor, being made up of three nodes
-  Del(Node &A, Node &B, Node &C) {
+  Del(Node3 &A, Node3 &B, Node3 &C) {
     if(A == B || A == C || B == C){
       throw std::invalid_argument("The Nodes A, B and C must be unique");
     }
     //Put the edges in order
-    vector<Node> n = vector<Node>(); n.push_back(A); n.push_back(B); n.push_back(C);
+    vector<Node3> n = vector<Node3>(); n.push_back(A); n.push_back(B); n.push_back(C);
     std::sort(n.begin(),n.end());
-    for(int i = 0; i < 3; i++)
+    for(int i = 0; i < 3; i++){
+      sisters[i] = NULL;
       edges[i] = Edge(n[i],n[ (i<2?i+1:0) ]);
-  }
-  
-  //Function to recursively assign pointers in two adjacent and joining Dels.
-  bool makeNeighbour(Del* nbr){
-    if(this->isFull()) return false;
-    for(int i = 0; i < 3 && nbr != NULL; i++){
-      if(neighbours[i] == nbr){ return true; }
-      for(int j = 0; j < 3; j++){
-        if(nbr->edges[j] == edges[i]){
-          neighbours[i] = nbr; 
-          networkCount++;
-          return nbr->makeNeighbour(this); //Network the counterpart
-        } 
-      }
-    }; return false;
-  }
-  
-  bool isBound(const double& z) const {
-    double zarr[4] = {edges[0].a.position.z,edges[0].b.position.z,
-                      edges[1].a.position.z,edges[1].b.position.z};
-    double  zMin = zarr[0],
-            zMax = zarr[0];
-    for(int i = 1; i < 4; i++){
-      zMin = min(zMin,zarr[i]);
-      zMax = max(zMax,zarr[i]);
     }
-    if(zMin < z && zMax > z) return true;
-    return false;
-  }      
-  
-  //Has this Del been fully networked, ie not on the hull
-  bool isFull() const { return networkCount == 3; }
-  
-  //Is the del partially on the convex hull
-  bool isOnHull() const { return networkCount == 1 || networkCount == 2; }
-  
-  //Is the del definately on a vertex of the hull
-  bool isCorner() const { return networkCount == 1; }
-  
-  //Draw Contour Recursively
-  void drawContour(double level, vector<Vec3>& contours, Del* from = NULL){  
+    aspectRatio = calcAspectRatio();
+  }
+  public:
+    //Public Members
+    Edge edges[3]; 
+    Del* sisters[3];
+    vector<Del*> cousins;
     
-    //Check candidature and availability
-    if(isIn(levelsDrawn,level) || !isBound(level)) 
-      return;
+    //reset the drawn levels
+    void reset(){ 
+      levelsDrawn.clear(); 
+    }
+    
+    //Function to recursively assign pointers in two adjacent and joining Dels.
+    bool makeSisters(Del* sister){
+      if(sister == NULL) 
+        return false;
+      if(this->isFull())
+        return sister == this->sisters[0] || sister == this->sisters[1] || sister == this->sisters[2]; 
+      for(int i = 0; i < 3; i++){
+        if(this->sisters[i] == sister)
+          return true;
+        for(int j = 0; j < 3; j++){
+          if(sister->edges[j] == edges[i]){
+            this->sisters[i] = sister; 
+            return sister->makeSisters(this); //Network the counterpart
+          } 
+        }
+      }; return false;
+    }
+    
+    bool makeCousins(Del* cousin){
+      if(cousin == NULL){return false;}
+      if(isIn<Del*>(cousins,cousin)){return true;}
+      for(int i = 0; i < 3; i++){
+        for(int j = 0; j < 3; j++){
+          if(cousin->edges[j].a == edges[i].a){
+            cousins.push_back(cousin);
+            return cousin->makeCousins(this);
+          }
+        }
+      }; return false;
+    }
+    
+    bool isBound(const double& z) const {
+      double zarr[4] = {edges[0].a.z,edges[0].b.z,
+                        edges[1].a.z,edges[1].b.z};
+      double  zMin = zarr[0],
+              zMax = zarr[0];
+      for(int i = 1; i < 4; i++){
+        zMin = min(zMin,zarr[i]);
+        zMax = max(zMax,zarr[i]);
+      }
+      if(zMin < z && zMax > z) return true;
+      return false;
+    }      
+    
+    //Has this Del been fully networked, ie not on the hull
+    bool isFull() const { return numberOfSisters() == 3; }
+    
+    //Does the del touch the hull
+    bool touchesHull(const vector<Node3>& chull) const{
+      for(int i = 0; i < 2; i++){
+        if(isIn<Node3>(chull,edges[i].a) || isIn<Node3>(chull,edges[i].b))
+          return true;
+      }
+      return false;
+    }
+    
+    //Draw Contour Recursively
+    void drawContour( const double& level, 
+                      const vector<Node3>& chull, 
+                      vector<Vec3>& contours, 
+                      Del* from, 
+                      vector<Del>& delLibrary,
+                      const double criticalRatio){  
       
-    //Iterate over the common edges.
-    for(unsigned int i = 0, cnt = 0; cnt < 2 && i < 3; i++){
-      Del* neighbour  = neighbours[i];
-      Edge* edge      = &edges[i]; 
-      unsigned int solutionType = 0;
+      //Check candidature and availability
+      if(isIn(levelsDrawn,level) || !isBound(level) || (aspectRatio >= abs(criticalRatio) && touchesHull(chull)))
+        return;
       
-      //Must be a different Neighbour
-      if((from == NULL || neighbour != from)  && edge->isBound(level) && (from == NULL || from->isFull()))
-        solutionType = 1;
-      //Run the different solutions depending on the nature 
-      if(solutionType == 1){
-      
-        //Reverse
-        if(cnt > 0 && from == NULL)
-          std::reverse(contours.begin(),contours.end());
+      for(unsigned int i = 0, cnt = 0; cnt < 2 && i < 3; i++){
+        Del* sister  = sisters[i];
+        Edge* edge   = &edges[i]; 
+        
+        //Must be a different Neighbour
+        if((from == NULL || sister != from)  && edge->isBound(level)) {
+        
+          //Reverse
+          if(cnt > 0 && from == NULL)
+            std::reverse(contours.begin(),contours.end());
+            
+          //Make this level unavailable anymore...
+          levelsDrawn.push_back(double(level));
           
-        //Make this level unavailable anymore...
-        levelsDrawn.push_back(level);
-        
-        //Push back the result for this level.
-        contours.push_back(interpolateZVal( (edge->a).position, (edge->b).position, level));
-        
-        //If Share an Edge, Execute Recursively, Referencing the 'from' pointer as 'this'
-        if(neighbour != NULL){ neighbour->drawContour(level,contours,this); }
-        
-        //Increment the Counter
-        cnt++;
+          //Push back the result for this level.
+          contours.push_back(interpolateZVal(edge->a,edge->b,level));
+          
+          //If Share an Edge, Execute Recursively, Referencing the 'from' pointer as 'this'
+          if(sister != NULL)
+            sister->drawContour(level,chull,contours,this,delLibrary,criticalRatio);
+          //Increment the Counter
+          cnt++;
+        }
       }
     }
-  }
-  
-  void reset(){
-    levelsDrawn.clear();
-  }
-  
-  //Public Members
-  Edge edges[3]; 
-  Del* neighbours[3] = {NULL};
   
   //Private Members and functions
   private:
-    unsigned int  networkCount = 0;
     vector<double> levelsDrawn;
-    int  howManyShared(){return networkCount;}
+    double aspectRatio;
+    double calcAspectRatio(){
+      double   a = edges[0].length(), 
+               b = edges[1].length(), 
+               c = edges[2].length();
+      double   s = (a + b + c) / 2.0;
+      return a*b*c/(8*(s-a)*(s-b)*(s-c));
+    }
+    int  numberOfSisters() const {
+      int n = 0;
+      for(int i = 0; i < 3; i++)
+        n += this->sisters[i] != NULL ? 1 : 0;
+      return n;
+    }
 };
 
 #endif

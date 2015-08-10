@@ -46,5 +46,4 @@
 #' @seealso \code{\link{getContourLines}}, \code{\link{contourLinesR}} and \code{\link{contourWalker}}
 #' @rdname contoureR
 #' @name contoureR
-#' @aliases contoureR-package
 NULL

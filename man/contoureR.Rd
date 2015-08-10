@@ -2,7 +2,6 @@
 % Please edit documentation in R/contoureR-package.R
 \name{contoureR}
 \alias{contoureR}
-\alias{contoureR-package}
 \title{contoureR: Contouring of Non-Regular Three-Dimensional Data}
 \description{
 Create contour lines for a non regular series of points, potentially from a non-regular canvas.

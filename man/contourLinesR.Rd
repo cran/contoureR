@@ -4,8 +4,8 @@
 \alias{contourLinesR}
 \title{Get Contour Lines (list)}
 \usage{
-contourLinesR(x, y, z, nlevels = 10, levels = pretty(range(z, na.rm = TRUE),
-  nlevels))
+contourLinesR(x, y, z, nlevels = 10, levels = pretty(range(z, na.rm =
+  TRUE)), ...)
 }
 \arguments{
 \item{x}{Numeric data for x and y coordinate, a single matrix or data-frame object can be provided for
@@ -24,6 +24,8 @@ have not been specified.}
 \item{levels}{A numeric vector of the explicitly specified levels (z values) to contour, by specifying this argument,
 it will override \code{nlevels} and/or \code{binwidth}. If this argument is provided, the stacking order of the
 contours will be preserved in the order of first occurence within the supplied vector.}
+
+\item{...}{any other parameters passed through to \code{\link{getContourLines}}}
 }
 \value{
 A list of contours is returned, Each contour is a list with the elements:

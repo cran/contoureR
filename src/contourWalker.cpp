@@ -2,13 +2,14 @@
 #include <math.h>
 #include <time.h> 
 #include <map>
-#include <vector>
+#include <vector> 
 #include <limits>
 
 #include "constants.h"          //Global Constants
 #include "functions.h"          //Functions
 #include "structs.h"
 #include "mtrand.h"
+#include "convexHull_Monotone.h"
 
 //Namespaces
 using namespace Rcpp;
@@ -17,12 +18,19 @@ using namespace std;
 //Forward Delcarations
 NumericVector           checkAndUniqueLevels(NumericVector& input);
 IntegerMatrix           checkAndSortDM(IntegerMatrix& dm, NumericMatrix& xyz);
-NumericMatrix           pertubate(IntegerMatrix& dm, NumericMatrix& xyz, NumericVector& levels, double& upToPercent);
+NumericMatrix           pertubate(const IntegerMatrix& dm, NumericMatrix& xyz, const NumericVector& levels, double upToPercent);
 
-inline Vec3 interpolateZVal(Vec3& a, Vec3& b, double& z){ Vec3 c = b - a; c *= (z-a.z)/c.z; c += a; c.z = z; return c; }
+
+Vec3 origin(0,0,0);
+bool compare_Vec3_sort(const Vec3& a, const Vec3& b){
+  return atan2(a.y-origin.y,a.x-origin.x) < atan2(b.y-origin.y,b.x-origin.x);
+}
+
 
 // [[Rcpp::export]]
-NumericMatrix contourWalker(IntegerMatrix& dm, NumericMatrix& xyz, NumericVector& levels, double maximumPertubation=1e-5){
+NumericMatrix contourWalker(IntegerMatrix& dm, NumericMatrix& xyz, NumericVector& levels, 
+                            double criticalRatio = 10.0, 
+                            double maximumPertubation=1e-5){
   //Create Local Copies & Variables
   IntegerMatrix dmNew     = IntegerMatrix(dm);  
   NumericMatrix xyzNew    = NumericMatrix(xyz); 
@@ -34,35 +42,50 @@ NumericMatrix contourWalker(IntegerMatrix& dm, NumericMatrix& xyz, NumericVector
   xyzNew        = pertubate(dmNew,xyzNew,levelsNew,maximumPertubation);
   
   //Variables
-  vector<Vec3> contour;
-  vector<ContourData> contourData;
-  unsigned int i, levelID, groupID, delID, pathID;
+  vector<Node3>         nodes;
+  vector<Node3>         chull;
+  vector<int>           chullIndexes;
+  vector<Vec3>          contour;
+  vector<ContourData>   contourData;
+  vector<Del>           dels;
   
   //Build Nodes
-  vector<Node>  nodes;
-  for(i = 0; i < xyzNew.nrow(); i++)
-    nodes.push_back(Node(i,Vec3(xyzNew(i,0), xyzNew(i,1), xyzNew(i,2))));
+  for(int i = 0; i < xyzNew.nrow(); i++)
+    nodes.push_back(Node3(i,Vec3(xyzNew(i,0), xyzNew(i,1), xyzNew(i,2))));
+    
+  //Determine the FULL Convex Hull, ie inclusive of points lying on the hull
+  bool  includeColinear   = true,   //Include All Points on the Hull
+        isZeroBased       = true;   //C++
+  chullIndexes = convexHullAM_IndexesVector(xyzNew.column(0),xyzNew.column(1),includeColinear,isZeroBased);
+  for(unsigned int i = 0; i < chullIndexes.size(); i++)
+    chull.push_back( nodes[ chullIndexes[i] ] );
   
   //Build Deleaunay Triangles
-  vector<Del>   dels;
-  for(i = 0; i < dmNew.nrow(); i++)
+  for(int i = 0; i < dmNew.nrow(); i++)
     dels.push_back(Del(nodes[dmNew(i,0)],nodes[dmNew(i,1)],nodes[dmNew(i,2)]));
   
   //Establish the Network
-  for(i = 0; i < dels.size() - 1; i++){
-    for(int j = i+1; !dels[i].isFull() && j < dels.size(); j++){
-      if(!dels[j].isFull())
-        (&(dels[i]))->makeNeighbour( &(dels[j]) ); //TRY
+  //Network Sisters (Dels that share an edge), 
+  //If they are not a sister, try and network them as a cousin (Dels that share a vertex)
+  for(size_t i = 0, ds = dels.size(); i < ds - 1; i++){
+    Del* di = &dels[i];
+    for(size_t j = i+1; !(di->isFull()) && j < ds; j++){
+      Del* dj = &dels[j];
+      di->makeSisters(dj);
     }
   }
   
   //Draw the Contours and pass the result back to the contour container by reference
-  for(levelID = 0; levelID < levelsNew.size(); levelID++){
+  size_t levelID, groupID, delID, pathID;
+  for(levelID = 0; levelID < (size_t)levelsNew.size(); levelID++){
       for(delID = 0, groupID = 0; delID < dels.size(); delID++){
-        (&(dels[delID]))->drawContour(levelsNew[levelID],contour,NULL);
-        for(pathID = 0; pathID < contour.size(); pathID++)
-          contourData.push_back(ContourData(levelID,groupID,pathID,contour[pathID].x,contour[pathID].y,contour[pathID].z));
-        groupID += (contour.size() > 0) ? 1 : 0;
+        double level = levelsNew[levelID];
+        (&(dels[delID]))->drawContour(level,chull,contour,NULL,dels,criticalRatio);
+        if(contour.size() > 2){
+          for(pathID = 0; pathID < contour.size(); pathID++)
+            contourData.push_back(ContourData(levelID,groupID,pathID,contour[pathID].x,contour[pathID].y,contour[pathID].z));
+          groupID++;
+        }
         contour.clear();
       }
       for(delID = 0; delID < dels.size(); delID++){
@@ -87,9 +110,9 @@ NumericVector checkAndUniqueLevels(NumericVector& input){
     throw std::out_of_range("The Levels Vector is Empty, please specify at least one level to contour.");
   vector<double> tmp = vector<double>();
   for(int i = 0; i < input.size(); i++)
-    if(!isIn(tmp,input(i))){ tmp.push_back(input(i)); }
-  NumericVector ret(tmp.begin(),tmp.end());
-  return ret;
+    tmp.push_back(input(i));
+  uniqueOnly<double>(tmp);
+  return NumericVector(tmp.begin(),tmp.end());
 }
 
 IntegerMatrix checkAndSortDM(IntegerMatrix& dm, NumericMatrix& xyz){
@@ -133,28 +156,41 @@ IntegerMatrix checkAndSortDM(IntegerMatrix& dm, NumericMatrix& xyz){
 }
 
 
-inline double nudge(double& input, double& upToPcnt){
+inline double nudge(double input, double upToPcnt){
   MTRand_closed drand;
-  double  random1 = drand() - 1.0, 
-          random2 = drand() - 1.0;
-  return input*(1.0 + random1*abs(upToPcnt)/100.0) + 2*random2*D_TOL;
+  double  r1 = -drand(), 
+          r2 = -drand();
+  return input*(1.0 + r1*abs(upToPcnt)/100.0) + r2*D_TOL;
 }
 
-NumericMatrix pertubate(IntegerMatrix& dm, NumericMatrix& xyz, NumericVector& levels, double& upToPercent){
-  int pb, i, limit = dm.nrow(), cnt=0;
+NumericMatrix pertubate(const IntegerMatrix& dm, NumericMatrix& xyz, const NumericVector& levels, double upToPercent){
+  int pb, i,j, limit = dm.nrow(), cnt=0;
   double pcnt = abs(upToPercent);
   while(cnt <= limit && abs(upToPercent - D_TOL) > 0){ 
     for(i = 0, pb = 0; i < dm.nrow(); i++){
       int    ix[3] = {dm(i,0),dm(i,1),dm(i,2)};
-      double z[3]  = {xyz(ix[0],2),xyz(ix[1],2),xyz(ix[2],2)};
-      if(isEqual(z[0],z[1])  || isEqual(z[0],z[2])  || isEqual(z[1],z[2]) || 
-         isIn(levels,z[0])   || isIn(levels,z[1])   || isIn(levels,z[2])){
-         xyz(ix[0],2) = nudge(z[0],pcnt);
-         xyz(ix[1],2) = nudge(z[1],pcnt);
-         xyz(ix[2],2) = nudge(z[2],pcnt);
-         pb++; 
+      double  z[3] = {xyz(ix[0],2),xyz(ix[1],2),xyz(ix[2],2)};
+      
+      //Check Points
+      if(isEqual(z[0],z[1])){
+        xyz(ix[1],2) = z[1] = nudge(z[1],pcnt); pb++;
       }
-    }; cnt++;
+      
+      //Check Points
+      if(isEqual(z[0],z[2]) || isEqual(z[1],z[2])){
+        xyz(ix[2],2) = z[2] = nudge(z[2],pcnt); pb++;
+      }
+       
+      //Check levels
+      for(j = 0; j < 3; j++){
+        z[j] = xyz(ix[j],2);
+        if(std::find(levels.begin(), levels.end(), z[j]) != levels.end()){
+          xyz(ix[j],2) = nudge(z[j],pcnt); pb++; 
+        }
+      }
+
+    }; 
+    cnt++;
     if(pb == 0) break;
   }
   return xyz;

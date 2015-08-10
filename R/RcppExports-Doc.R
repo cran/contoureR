@@ -46,3 +46,32 @@
 #' ggplot(res,aes(x,y,group=Group,colour=z)) + geom_path()
 NULL
 
+#' Convex Hull via Andrews Monotone, Rcpp Interface to C++ Routine
+#' 
+#' This function is the R interface to the C++ implementation of Andrews Monotone, a well known algorithm for solving
+#' the convex hull in \code{O(nlogn)} time complexity.
+#' @param x NumericVector of x values
+#' @param y NumericVector of y values
+#' @param includeColinear whether to inlude points that line \strong{ON} the hull, by default this is set to FALSE, as this is
+#' the true definition of the convex hull.
+#' @param  zeroBased Whether the return indexes should be zero based (true, for use in C++), 
+#' or One-Based (false, for use in R).
+#' @usage 
+#' convexHullAM_Indexes(x, y, includeColinear=FALSE,zeroBased = TRUE)
+#' convexHullAM_Points(x, y,includeColinear=FALSE)
+#' @return \code{convexHullAM_Indexes} returns an integer vector of the indexes of the points, 
+#' whilst \code{convexHullAM_Points} returns an \code{n x 2} matrix of the points themselves.
+#' @examples
+#' library(contoureR)
+#' library(ggplot2)
+#' set.seed(1)
+#' x  = runif(100)
+#' y  = runif(100)
+#' ch = convexHullAM_Indexes(x,y,includeColinear=FALSE,zeroBased = FALSE)
+#' ggplot(data.frame(x,y),aes(x,y)) + 
+#'  geom_point() + 
+#'  geom_path(data=data.frame(x,y)[ch,],colour="red")
+#' @name convexHullAM
+#' @rdname convexHullAM
+#' @aliases convexHullAM_Indexes convexHullAM_Points
+NULL

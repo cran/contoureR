@@ -16,6 +16,10 @@
 #'@param levels A numeric vector of the explicitly specified levels (z values) to contour, by specifying this argument, 
 #'it will override \code{nlevels} and/or \code{binwidth}. If this argument is provided, the stacking order of the 
 #'contours will be preserved in the order of first occurence within the supplied vector.
+#'@param criticalRatio When producing the Delaunay Mesh, the quality of the mesh can be poor in the proximity
+#'to the convex hull, Del's that have an aspect ratio greater than this value are not considered when producing the 
+#'contours. In this context, the aspect ratio is defined as the circumradius to twice its inradius, 
+#'equilateral triangles have an aspect ratio of 1, everything else is larger
 #'@return For the function \code{getContourLines(...)}, the return object is a \code{data.frame} obect 
 #'representing the contours, assembled in such way to permit easy use within the \code{ggplot2} paradigm.
 #'Such data frame contains seven (7) columns: 
@@ -47,7 +51,7 @@
 #'df$z   = with(df,-x*y*exp(-x^2-y^2)) 
 #'df.cnt = getContourLines(df)
 #'ggplot(data=df.cnt,aes(x,y,group=Group,colour=z)) + geom_path()
-getContourLines <- function(x,y,z,nlevels=10,binwidth,levels){
+getContourLines <- function(x,y,z,nlevels=10,binwidth,levels,criticalRatio=5.0){
   bins = nlevels
   buildFrame = TRUE
   if(class(x) %in% c('data.frame','matrix')){
@@ -86,18 +90,23 @@ getContourLines <- function(x,y,z,nlevels=10,binwidth,levels){
     if(!is.numeric(bins))
       stop("'bins' is expected to be numeric")
     bins    = max(as.integer(round(bins)),1)
-    levels  = seq(zRange[1],zRange[2], by = diff(zRange)/(bins+1))
+    step    = diff(zRange)/(bins+1)
+    #levels  = seq(zRange[1]+step/2,zRange[2]-step/2, by = step)
+    levels  = seq(zRange[1],zRange[2], by = step)
   }
   
   #Now Process for the given levels
   dm      = getDelaunayMesh(inputData$x,inputData$y) 
   
   #Solve the Contour
-  result  = data.frame(contourWalker(dm,as.matrix(inputData),levels=levels));
+  result  = data.frame(contourWalker(dm,as.matrix(inputData),levels=levels,criticalRatio=criticalRatio));
   colnames(result) = c("LID","GID","PID","x","y","z")
   
   #Add the interaction between LID and GID, to Produce Group
-  result$Group = interaction(result[,1],result[,2],sep="-")
+  result$Group = paste(result[,1],result[,2],sep="-")
+  result$Group = factor(result$Group,levels=unique(result$Group))
+  #result$Group = interaction(result[,1],result[,2],sep="-")
+  
   
   #Reorder and return
   return(invisible(result[,c("LID","GID","PID","Group","x","y","z")]));
@@ -113,6 +122,7 @@ getContourLines <- function(x,y,z,nlevels=10,binwidth,levels){
 #'ie, list of lists, which is different from the (preferred) \code{dataframe} object returned
 #'by the \code{\link{getContourLines}} function as part of the present work.
 #' @inheritParams getContourLines
+#' @param ... any other parameters passed through to \code{\link{getContourLines}}
 #' @seealso \code{\link{getContourLines}}
 #' @return
 #' A list of contours is returned, Each contour is a list with the elements:
@@ -128,8 +138,8 @@ getContourLines <- function(x,y,z,nlevels=10,binwidth,levels){
 #' z  = with(df,x+y)
 #' result = contourLinesR(df$x,df$y,z)
 #' @aliases contourLinesR
-contourLinesR <- function(x,y,z,nlevels=10,levels=pretty(range(z, na.rm = TRUE), nlevels)){
-  result = getContourLines(x,y,z,nlevels,levels)
+contourLinesR <- function(x,y,z,nlevels=10,levels=pretty(range(z, na.rm = TRUE)),...){
+  result = getContourLines(x,y,z,nlevels,levels,...)
   result = dlply(result,c("Group"),function(df){
     r = list(); 
     r$level = df$z[1]; r$x = df$x; r$y = df$y
